@@ -120,7 +120,7 @@ export default function Home() {
           <div>
             <p className="text-xs font-semibold text-green-600">MEMO-APP</p>
             <h1 className="mt-1 text-2xl font-bold tracking-tight text-gray-900">
-              {userId ? "メモ" : "ログイン"}
+            たくみんのメモアプリ❤️
             </h1>
             <p className="mt-1 text-sm text-gray-600">
               {userId
