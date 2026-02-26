@@ -7,6 +7,7 @@ type Note = {
   id: string
   user_id: string
   title: string
+  created_at?: string
 }
 
 export default function Home() {
@@ -18,84 +19,73 @@ export default function Home() {
   const [notes, setNotes] = useState<Note[]>([])
   const [loading, setLoading] = useState(false)
 
-  // ① ログイン状態を取得＆監視
+  // 初回：ログイン状態取得
   useEffect(() => {
     const init = async () => {
-      console.log("init start")
-  
       const { data } = await supabase.auth.getSession()
       const uid = data.session?.user?.id ?? null
-  
-      console.log("uid:", uid)
-  
       setUserId(uid)
-  
-      if (uid) {
-        fetchNotes() // ← awaitを外す
-      }
+      if (uid) await fetchNotes(uid)
     }
-  
     init()
-  
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      const uid = session?.user?.id ?? null
-      setUserId(uid)
-      if (uid) fetchNotes()
-      else setNotes([])
-    })
-  
-    return () => sub.subscription.unsubscribe()
   }, [])
 
-  // ② ログインリンク送信（Magic Link）
+  // ログインリンク送信
   const sendMagicLink = async () => {
-    setMessage("送信中...")
-    const { error } = await supabase.auth.signInWithOtp({ email })
-    if (error) setMessage(`エラー: ${error.message}`)
+    setMessage("")
+    if (!email.trim()) {
+      setMessage("メールアドレスを入力してください。")
+      return
+    }
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+    })
+
+    if (error) setMessage("エラー: " + error.message)
     else setMessage("ログインリンクを送信しました。メールを確認してください。")
   }
 
-  // ③ ログアウト
+  // ログアウト
   const signOut = async () => {
     await supabase.auth.signOut()
+    setUserId(null)
+    setNotes([])
+    setNewTitle("")
     setMessage("")
-    setEmail("")
   }
 
-  // ④ 自分のメモ一覧を取得（ここを強化：finallyでloading解除）
-  const fetchNotes = async () => {
-    console.log("[fetchNotes] start")
+  // 一覧取得
+  const fetchNotes = async (uid?: string) => {
+    const targetUid = uid ?? userId
+    if (!targetUid) return
+
     setLoading(true)
     setMessage("")
 
     try {
       const { data, error } = await supabase
         .from("notes")
-        .select("id, user_id, title")
-        .order("id", { ascending: false })
-
-      console.log("[fetchNotes] done", { error, data })
+        .select("id, user_id, title, created_at")
+        .eq("user_id", targetUid)
+        .order("created_at", { ascending: false })
 
       if (error) {
-        setMessage(`取得エラー: ${error.message}`)
+        setMessage("取得エラー: " + error.message)
         return
       }
 
       setNotes((data ?? []) as Note[])
     } catch (e: any) {
-      console.log("[fetchNotes] exception", e)
-      setMessage(`取得例外: ${e?.message ?? String(e)}`)
+      setMessage("取得例外: " + (e?.message ?? String(e)))
     } finally {
       setLoading(false)
-      console.log("[fetchNotes] finally -> loading false")
     }
   }
 
-  // ⑤ メモ保存（user_idはログイン中ユーザーIDを入れる）
+  // 追加
   const addNote = async () => {
-    console.log("[addNote] clicked", { userId, newTitle })
     setMessage("")
-
     if (!userId) return
     if (!newTitle.trim()) {
       setMessage("メモ内容を入力してください。")
@@ -107,93 +97,176 @@ export default function Home() {
       title: newTitle.trim(),
     })
 
-    if (error) {
-      setMessage(`保存エラー: ${error.message}`)
-      return
+    if (error) setMessage("追加エラー: " + error.message)
+    else {
+      setNewTitle("")
+      await fetchNotes(userId)
     }
-
-    setNewTitle("")
-    await fetchNotes()
   }
 
-  // ⑥ 削除
+  // 削除
   const deleteNote = async (id: string) => {
+    setMessage("")
     const { error } = await supabase.from("notes").delete().eq("id", id)
-    if (error) setMessage(`削除エラー: ${error.message}`)
-    else await fetchNotes()
-  }
-
-  // -------------------------
-  // UI
-  // -------------------------
-  if (!userId) {
-    return (
-      <main style={{ padding: 40 }}>
-        <p style={{ color: "green" }}>VERSION_20260226_1208</p>
-        <h1>Memo App ログイン</h1>
-        <p>メールアドレスにログインリンクを送ります</p>
-
-        <input
-          style={{ padding: 8, width: 320 }}
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@example.com"
-        />
-        <button style={{ marginLeft: 8, padding: 8 }} onClick={sendMagicLink}>
-          ログインリンク送信
-        </button>
-
-        <p style={{ marginTop: 16 }}>{message}</p>
-      </main>
-    )
+    if (error) setMessage("削除エラー: " + error.message)
+    else await fetchNotes(userId ?? undefined)
   }
 
   return (
-    <main style={{ padding: 40 }}>
-      <p style={{ color: "green" }}>VERSION_20260226_1208</p>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h1>メモ</h1>
-        <button onClick={signOut} style={{ padding: 8 }}>
-          ログアウト
-        </button>
-      </div>
+    <main className="min-h-screen bg-gray-100 px-4 py-10">
+      <div className="mx-auto w-full max-w-3xl">
+        {/* ヘッダー */}
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold text-green-600">MEMO-APP</p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-gray-900">
+              {userId ? "メモ" : "ログイン"}
+            </h1>
+            <p className="mt-1 text-sm text-gray-600">
+              {userId
+                ? "自分のメモだけをクラウドに保存します。"
+                : "メールに届くリンクでログインします。パスワード不要。"}
+            </p>
+          </div>
 
-      <p style={{ opacity: 0.7, marginTop: 0 }}>user_id: {userId}</p>
+          {userId ? (
+            <button
+              onClick={signOut}
+              className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm ring-1 ring-gray-200 hover:bg-gray-50"
+            >
+              ログアウト
+            </button>
+          ) : null}
+        </div>
 
-      <div style={{ marginTop: 16 }}>
-        <input
-          style={{ padding: 8, width: 360 }}
-          value={newTitle}
-          onChange={(e) => setNewTitle(e.target.value)}
-          placeholder="メモを入力…"
-        />
-        <button style={{ marginLeft: 8, padding: 8 }} onClick={addNote}>
-          保存
-        </button>
-        <button style={{ marginLeft: 8, padding: 8 }} onClick={fetchNotes}>
-          再読み込み
-        </button>
-      </div>
+        {/* メインカード */}
+        <div className="mt-6 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-200">
+          {/* ログイン画面 */}
+          {!userId ? (
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700">
+                  メールアドレス
+                </label>
+                <input
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-gray-900 placeholder:text-gray-400 shadow-sm outline-none focus:border-gray-400 focus:ring-4 focus:ring-gray-100"
+                />
+              </div>
 
-      <p style={{ marginTop: 16, color: "crimson" }}>{message}</p>
-
-      <h2 style={{ marginTop: 24 }}>一覧</h2>
-      {loading ? (
-        <p>読み込み中…</p>
-      ) : notes.length === 0 ? (
-        <p>まだメモがありません</p>
-      ) : (
-        <ul style={{ marginTop: 12 }}>
-          {notes.map((n) => (
-            <li key={n.id} style={{ marginBottom: 8 }}>
-              {n.title}
-              <button style={{ marginLeft: 8 }} onClick={() => deleteNote(n.id)}>
-                削除
+              <button
+                onClick={sendMagicLink}
+                className="w-full rounded-xl bg-gray-900 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-gray-800 active:bg-gray-900"
+              >
+                ログインリンク送信
               </button>
-            </li>
-          ))}
-        </ul>
-      )}
+
+              {message ? (
+                <p className="text-sm text-gray-700">{message}</p>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  ※ 迷惑メールフォルダも確認してください。
+                </p>
+              )}
+            </div>
+          ) : (
+            // メモ画面
+            <div className="space-y-6">
+              {/* user_id */}
+              <div className="rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-700 ring-1 ring-gray-200">
+                <span className="font-semibold text-gray-900">user_id:</span>{" "}
+                {userId}
+              </div>
+
+              {/* 入力 */}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <input
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="メモを入力..."
+                  className="w-full flex-1 rounded-xl border border-gray-200 bg-white px-4 py-3 text-gray-900 placeholder:text-gray-400 shadow-sm outline-none focus:border-gray-400 focus:ring-4 focus:ring-gray-100"
+                />
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={addNote}
+                    className="rounded-xl bg-gray-900 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-gray-800"
+                  >
+                    保存
+                  </button>
+                  <button
+                    onClick={() => fetchNotes()}
+                    className="rounded-xl bg-white px-4 py-3 text-sm font-semibold text-gray-700 shadow-sm ring-1 ring-gray-200 hover:bg-gray-50"
+                  >
+                    再読み込み
+                  </button>
+                </div>
+              </div>
+
+              {/* メッセージ */}
+              {message ? (
+                <p className="text-sm font-medium text-red-600">{message}</p>
+              ) : null}
+
+              {/* 一覧 */}
+              <div>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-gray-900">一覧</h2>
+                  <span className="text-xs text-gray-500">
+                    {loading ? "読み込み中..." : `${notes.length} 件`}
+                  </span>
+                </div>
+
+                <div className="mt-3">
+                  {loading ? (
+                    <div className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-600">
+                      読み込み中...
+                    </div>
+                  ) : notes.length === 0 ? (
+                    <div className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-600">
+                      まだメモがありません
+                    </div>
+                  ) : (
+                    <ul className="space-y-2">
+                      {notes.map((n) => (
+                        <li
+                          key={n.id}
+                          className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-gray-900">
+                              {n.title}
+                            </p>
+                            {n.created_at ? (
+                              <p className="mt-1 text-xs text-gray-500">
+                                {new Date(n.created_at).toLocaleString()}
+                              </p>
+                            ) : null}
+                          </div>
+
+                          <button
+                            onClick={() => deleteNote(n.id)}
+                            className="ml-3 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
+                          >
+                            削除
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* フッター */}
+        <p className="mt-6 text-center text-xs text-gray-500">
+          Built with Next.js + Supabase + Tailwind
+        </p>
+      </div>
     </main>
   )
 }
